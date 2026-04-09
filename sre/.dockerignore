@@ -1,0 +1,39 @@
+# Git
+.git
+.gitignore
+
+# Other interview modules (not needed for backend build)
+frontend/
+data/
+ml/
+mobile/
+qa/
+
+# SRE artifacts (avoid recursive context)
+sre/helm/
+sre/grafana/
+sre/.dockerignore
+sre/Dockerfile
+sre/*.md
+
+# IDE and editor files
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+.project
+.classpath
+.settings/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Build output (use the build stage, not local artifacts)
+backend/target/
+
+# Docs
+*.md
+!backend/src/**/*.md
+LICENSE

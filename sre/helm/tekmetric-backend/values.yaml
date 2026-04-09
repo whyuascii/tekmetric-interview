@@ -1,0 +1,143 @@
+environment:
+  name: dev
+
+replicaCount: 2
+
+image:
+  repository: 123456789012.dkr.ecr.us-east-1.amazonaws.com/tekmetric-backend
+  tag: "latest"
+  digest: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# --- Service Account (IRSA-ready for EKS) ---
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+  automountServiceAccountToken: false
+
+# --- Pod Security ---
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+# --- Application Configuration ---
+env:
+  JAVA_OPTS: "-XX:MaxRAMPercentage=75.0 -XX:InitialRAMPercentage=50.0 -Djava.io.tmpdir=/app/tmp"
+  SPRING_PROFILES_ACTIVE: "default"
+
+# Use AWS Secrets Manager + External Secrets Operator for production secrets
+envFrom: []
+
+# --- Service ---
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8080
+  annotations: {}
+
+# --- Ingress (AWS ALB) ---
+ingress:
+  enabled: false
+  className: alb
+  annotations: {}
+  hosts:
+    - host: tekmetric-backend.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+# --- Health Probes ---
+probes:
+  startup:
+    httpGet:
+      path: /api/welcome
+      port: http
+    failureThreshold: 30
+    periodSeconds: 2
+  liveness:
+    httpGet:
+      path: /api/welcome
+      port: http
+    initialDelaySeconds: 0
+    periodSeconds: 10
+    failureThreshold: 3
+    timeoutSeconds: 3
+  readiness:
+    httpGet:
+      path: /api/welcome
+      port: http
+    initialDelaySeconds: 0
+    periodSeconds: 5
+    failureThreshold: 3
+    timeoutSeconds: 3
+
+# --- Resources ---
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
+
+# --- Autoscaling ---
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+
+# --- Pod Disruption Budget ---
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# --- Deployment Strategy ---
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 0
+
+terminationGracePeriodSeconds: 30
+
+# --- Scheduling ---
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []
+
+# --- Priority ---
+priorityClassName: ""
+
+# --- Pod Metadata ---
+podAnnotations: {}
+podLabels: {}
+
+# --- Network Policy ---
+networkPolicy:
+  enabled: false
+  ingressFrom: []
+  ingress: []
+  egress: []

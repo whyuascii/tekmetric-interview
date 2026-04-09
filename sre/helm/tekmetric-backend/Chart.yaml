@@ -1,0 +1,12 @@
+apiVersion: v2
+name: tekmetric-backend
+description: Tekmetric Backend Spring Boot Service
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - spring-boot
+  - backend
+  - api
+maintainers:
+  - name: SRE Team

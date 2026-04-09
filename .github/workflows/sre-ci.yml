@@ -1,0 +1,184 @@
+name: SRE CI
+
+on:
+  push:
+    branches: [master, main]
+    paths:
+      - 'backend/**'
+      - 'sre/**'
+      - '.github/workflows/sre-ci.yml'
+  pull_request:
+    branches: [master, main]
+    paths:
+      - 'backend/**'
+      - 'sre/**'
+      - '.github/workflows/sre-ci.yml'
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: tekmetric-backend
+  HELM_CHART_PATH: sre/helm/tekmetric-backend
+
+jobs:
+  validate-helm:
+    name: Validate Helm Chart
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.14.0
+
+      - name: Install kubeconform
+        run: |
+          curl -fsSL https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz \
+            | tar xz -C /usr/local/bin
+
+      - name: Lint chart
+        run: helm lint ${{ env.HELM_CHART_PATH }}
+
+      - name: Template and validate — default values
+        run: |
+          helm template tekmetric-backend ${{ env.HELM_CHART_PATH }} \
+            --set image.repository=test.dkr.ecr.us-east-1.amazonaws.com/tekmetric-backend \
+            > rendered.yaml
+          kubeconform -strict -summary -kubernetes-version 1.29.0 rendered.yaml
+
+      - name: Template and validate — dev
+        run: |
+          helm template tekmetric-backend ${{ env.HELM_CHART_PATH }} \
+            -f ${{ env.HELM_CHART_PATH }}/values-dev.yaml \
+            --set image.repository=test.dkr.ecr.us-east-1.amazonaws.com/tekmetric-backend \
+            > rendered-dev.yaml
+          kubeconform -strict -summary -kubernetes-version 1.29.0 rendered-dev.yaml
+
+      - name: Template and validate — staging
+        run: |
+          helm template tekmetric-backend ${{ env.HELM_CHART_PATH }} \
+            -f ${{ env.HELM_CHART_PATH }}/values-staging.yaml \
+            --set image.repository=test.dkr.ecr.us-east-1.amazonaws.com/tekmetric-backend \
+            > rendered-staging.yaml
+          kubeconform -strict -summary -kubernetes-version 1.29.0 rendered-staging.yaml
+
+      - name: Template and validate — production
+        run: |
+          helm template tekmetric-backend ${{ env.HELM_CHART_PATH }} \
+            -f ${{ env.HELM_CHART_PATH }}/values-production.yaml \
+            --set image.repository=test.dkr.ecr.us-east-1.amazonaws.com/tekmetric-backend \
+            > rendered-prod.yaml
+          kubeconform -strict -summary -kubernetes-version 1.29.0 rendered-prod.yaml
+
+      - name: Template and validate — ephemeral
+        run: |
+          helm template tekmetric-backend ${{ env.HELM_CHART_PATH }} \
+            -f ${{ env.HELM_CHART_PATH }}/values-ephemeral.yaml \
+            --set image.repository=test.dkr.ecr.us-east-1.amazonaws.com/tekmetric-backend \
+            > rendered-ephemeral.yaml
+          kubeconform -strict -summary -kubernetes-version 1.29.0 rendered-ephemeral.yaml
+
+  build-and-push:
+    name: Build & Push to ECR
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Generate image metadata
+        id: meta
+        run: |
+          ECR_REGISTRY="${{ steps.ecr-login.outputs.registry }}"
+          IMAGE_BASE="${ECR_REGISTRY}/${{ env.ECR_REPOSITORY }}"
+          SHA_SHORT=$(echo "${{ github.sha }}" | cut -c1-7)
+
+          TAGS="${IMAGE_BASE}:${SHA_SHORT}"
+
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            TAGS="${TAGS},${IMAGE_BASE}:latest"
+          fi
+
+          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
+          echo "sha_tag=${SHA_SHORT}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: sre/Dockerfile
+          push: ${{ github.event_name == 'push' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  security-scan:
+    name: Security Scan
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      id-token: write
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image for scanning
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: sre/Dockerfile
+          push: false
+          load: true
+          tags: tekmetric-backend:scan
+          cache-from: type=gha
+
+      - name: Trivy vulnerability scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: tekmetric-backend:scan
+          format: table
+          severity: CRITICAL,HIGH
+          exit-code: '0'
+
+      - name: Trivy SARIF report
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: tekmetric-backend:scan
+          format: sarif
+          output: trivy-results.sarif
+          severity: CRITICAL,HIGH
+
+      - name: Upload to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-results.sarif

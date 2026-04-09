@@ -1,0 +1,27 @@
+{{ .Release.Name }} has been deployed to namespace {{ .Release.Namespace }}.
+
+Environment: {{ .Values.environment.name }}
+Replicas:    {{ .Values.replicaCount }}
+
+Service:
+  kubectl get svc {{ include "tekmetric-backend.fullname" . }} -n {{ .Release.Namespace }}
+
+{{- if .Values.ingress.enabled }}
+
+Ingress:
+{{- range .Values.ingress.hosts }}
+  https://{{ .host }}
+{{- end }}
+{{- else }}
+
+Port-forward (no ingress):
+  kubectl port-forward svc/{{ include "tekmetric-backend.fullname" . }} 8080:{{ .Values.service.port }} -n {{ .Release.Namespace }}
+  curl http://localhost:8080/api/welcome
+{{- end }}
+
+Verify:
+  helm test {{ .Release.Name }} -n {{ .Release.Namespace }}
+
+Rollback:
+  helm rollback {{ .Release.Name }} <REVISION> -n {{ .Release.Namespace }}
+  helm history {{ .Release.Name }} -n {{ .Release.Namespace }}

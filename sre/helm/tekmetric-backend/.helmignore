@@ -1,0 +1,7 @@
+.git
+.gitignore
+.DS_Store
+*.md
+*.tgz
+.idea/
+.vscode/

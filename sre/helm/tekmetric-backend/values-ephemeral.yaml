@@ -1,0 +1,49 @@
+# Ephemeral QA environment — spun up per PR, torn down after merge
+#
+# Deploy with:
+#   helm upgrade --install tekmetric-backend-pr-${PR_NUMBER} ./sre/helm/tekmetric-backend \
+#     -n qa-pr-${PR_NUMBER} \
+#     --create-namespace \
+#     -f values.yaml \
+#     -f values-ephemeral.yaml \
+#     --set ingress.hosts[0].host=tekmetric-pr-${PR_NUMBER}.example.com \
+#     --set image.tag=sha-${SHORT_SHA} \
+#     --set environment.name=qa-pr-${PR_NUMBER} \
+#     --rollback-on-failure --wait --timeout 5m
+
+environment:
+  name: ephemeral
+
+replicaCount: 1
+
+resources:
+  requests:
+    cpu: 125m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+autoscaling:
+  enabled: false
+
+podDisruptionBudget:
+  enabled: false
+
+ingress:
+  enabled: true
+  className: alb
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internal
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/healthcheck-path: /api/welcome
+  hosts:
+    - host: tekmetric-pr-000.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+
+networkPolicy:
+  enabled: false
+
+terminationGracePeriodSeconds: 10
